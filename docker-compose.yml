@@ -2,31 +2,15 @@ version: '3.8'
 
 services:
   # Database Services
-  redis:
-    image: redis:alpine
-    container_name: chat-redis
-    restart: unless-stopped
-    ports:
-      - "6380:6379"
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-    networks:
-      - chat-network
-
   pg:
     image: postgres:alpine
     container_name: chat-postgres
-    restart: unless-stopped
+    restart: always
     ports:
       - "5480:5432"
     volumes:
       - pg_data:/var/lib/postgresql/data
-      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./chat-backend/drizzle/init.sql:/docker-entrypoint-initdb.d/init.sql
     environment:
       - POSTGRES_USER=bita-dev
       - POSTGRES_PASSWORD=bita-dev-admin
@@ -46,24 +30,26 @@ services:
     build:
       context: ./chat-backend
       dockerfile: Dockerfile
-      target: production
     container_name: chat-backend
     restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
-      - NODE_ENV=production
+      - NODE_ENV=development
       - PORT=3001
       - DATABASE_URL=postgresql://bita-dev:bita-dev-admin@pg:5432/test-db
-      - REDIS_URL=redis://redis:6379
-      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      - DB_HOST=pg
+      - DB_PORT=5432
+      - DB_USER=bita-dev
+      - DB_PASSWORD=bita-dev-admin
+      - DB_NAME=test-db
+      - JWT_SECRET=temporary-secret
       - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - CORS_ORIGIN=http://localhost:8080
+      - CORS_ORIGIN=http://localhost:3000
     depends_on:
       pg:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+
     healthcheck:
       test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health" ]
       interval: 30s
@@ -72,7 +58,9 @@ services:
       start_period: 40s
     networks:
       - chat-network
+
     volumes:
+      - ./chat-backend:/app
       - backend_uploads:/app/uploads
 
   # Frontend Service
@@ -80,19 +68,20 @@ services:
     build:
       context: ./chat-frontend
       dockerfile: Dockerfile
-      target: production
     container_name: chat-frontend
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "3000:3000"
     environment:
       - VITE_API_URL=http://localhost:3001
       - VITE_WS_URL=http://localhost:3001
     depends_on:
       chat-backend:
         condition: service_healthy
+    volumes:
+      - ./chat-frontend:/app
     healthcheck:
-      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health" ]
+      test: [ "CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health" ]
       interval: 30s
       timeout: 10s
       retries: 3

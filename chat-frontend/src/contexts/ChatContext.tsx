@@ -66,13 +66,36 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             return
         }
 
+        console.log('ChatContext: Initializing socket connection for user:', user.email)
         const socket = socketService.connect(token)
 
         socket.on('connect', () => {
+            console.log('ChatContext: Socket connected successfully')
             setIsConnected(true)
         })
 
         socket.on('disconnect', () => {
+            console.log('ChatContext: Socket disconnected')
+            setIsConnected(false)
+        })
+
+        // Handle authentication errors
+        socketService.onAuthError((error: any) => {
+            console.error('ChatContext: Socket authentication failed:', error)
+            setIsConnected(false)
+
+            // If authentication failed, the token might be expired or invalid
+            if (error.action === 'LOGOUT_REQUIRED') {
+                console.log('ChatContext: Forcing logout due to authentication failure')
+                // This will trigger a logout through the auth context
+                window.dispatchEvent(new CustomEvent('auth:force-logout', {
+                    detail: { reason: 'Socket authentication failed' }
+                }))
+            }
+        })
+
+        socketService.onConnectionFailed((data: any) => {
+            console.error('ChatContext: Socket connection failed after multiple attempts:', data)
             setIsConnected(false)
         })
 
@@ -130,9 +153,20 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             console.error('Socket error:', error)
             setIsAITyping(false)
             setStreamingMessage('')
+
+            // Handle specific error codes
+            if (error.code === 'CONVERSATION_ACCESS_DENIED') {
+                console.error('Access denied to conversation - user may not have permission')
+            } else if (error.code === 'USER_ID_MISMATCH') {
+                console.error('Security violation detected - forcing logout')
+                window.dispatchEvent(new CustomEvent('auth:force-logout', {
+                    detail: { reason: 'Security violation detected' }
+                }))
+            }
         })
 
         return () => {
+            console.log('ChatContext: Cleaning up socket connection')
             socketService.disconnect()
         }
     }, [user, token])

@@ -39,6 +39,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
     }, [])
 
+    // Listen for force logout events (e.g., from socket authentication failures)
+    useEffect(() => {
+        const handleForceLogout = (event: CustomEvent) => {
+            console.log('AuthContext: Force logout triggered:', event.detail)
+            logout()
+        }
+
+        // Type assertion for custom event
+        window.addEventListener('auth:force-logout', handleForceLogout as EventListener)
+
+        return () => {
+            window.removeEventListener('auth:force-logout', handleForceLogout as EventListener)
+        }
+    }, [])
+
     const login = async (email: string, password: string) => {
         setIsLoading(true)
         try {
