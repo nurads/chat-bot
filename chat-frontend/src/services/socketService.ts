@@ -8,17 +8,26 @@ class SocketService {
         this.serverUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
     }
 
-    connect(): Socket {
+    connect(token?: string): Socket {
         if (this.socket?.connected) {
             return this.socket
         }
 
-        this.socket = io(this.serverUrl, {
+        const socketOptions: any = {
             autoConnect: true,
             reconnection: true,
             reconnectionAttempts: 5,
             reconnectionDelay: 1000,
-        })
+        }
+
+        // Add authentication if token is provided
+        if (token) {
+            socketOptions.auth = {
+                token
+            }
+        }
+
+        this.socket = io(this.serverUrl, socketOptions)
 
         this.socket.on('connect', () => {
             console.log('Connected to server:', this.socket?.id)
@@ -30,6 +39,10 @@ class SocketService {
 
         this.socket.on('connect_error', (error) => {
             console.error('Connection error:', error)
+        })
+
+        this.socket.on('auth_error', (error) => {
+            console.error('Authentication error:', error)
         })
 
         return this.socket

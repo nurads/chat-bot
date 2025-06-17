@@ -1,13 +1,18 @@
 import { Server as SocketIOServer } from 'socket.io';
 import { Server as HTTPServer } from 'http';
+import jwt from 'jsonwebtoken';
 import { db } from '../db';
-import { conversations, messages } from '../db/schema';
+import { conversations, messages, users } from '../db/schema';
 import { openaiService } from './openai';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 interface ChatMessage {
     role: 'user' | 'assistant' | 'system';
     content: string;
+}
+
+interface AuthenticatedSocket extends SocketIOServer {
+    userId?: string;
 }
 
 export class WebSocketService {
@@ -25,24 +30,74 @@ export class WebSocketService {
     }
 
     private setupSocketHandlers() {
-        this.io.on('connection', (socket) => {
-            console.log(`Client connected: ${socket.id}`);
+        // Authentication middleware for socket connections
+        this.io.use(async (socket: any, next) => {
+            try {
+                const token = socket.handshake.auth.token;
 
-            // Handle joining a conversation room
+                if (!token) {
+                    return next(new Error('Authentication error: No token provided'));
+                }
 
-            socket.on('join_conversation', (conversationId: string) => {
-                socket.join(conversationId);
-                console.log(`Client ${socket.id} joined conversation: ${conversationId}`);
+                const decoded = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret') as any;
+
+                // Verify user exists in database
+                const user = await db.select({
+                    id: users.id,
+                    username: users.username,
+                    email: users.email,
+                }).from(users).where(eq(users.id, decoded.userId));
+
+                if (user.length === 0) {
+                    return next(new Error('Authentication error: User not found'));
+                }
+
+                // Attach user info to socket
+                socket.userId = user[0].id;
+                socket.user = user[0];
+                next();
+            } catch (error) {
+                console.error('Socket authentication error:', error);
+                next(new Error('Authentication error: Invalid token'));
+            }
+        });
+
+        this.io.on('connection', (socket: any) => {
+            console.log(`Client connected: ${socket.id}, User: ${socket.user?.username}`);
+
+            // Handle joining a conversation room (verify user owns the conversation)
+            socket.on('join_conversation', async (conversationId: string) => {
+                try {
+                    // Verify the conversation belongs to the user
+                    const conversation = await db
+                        .select()
+                        .from(conversations)
+                        .where(and(
+                            eq(conversations.id, conversationId),
+                            eq(conversations.userId, socket.userId)
+                        ));
+
+                    if (conversation.length === 0) {
+                        socket.emit('error', { message: 'Conversation not found or access denied' });
+                        return;
+                    }
+
+                    socket.join(conversationId);
+                    console.log(`Client ${socket.id} joined conversation: ${conversationId}`);
+                } catch (error) {
+                    console.error('Error joining conversation:', error);
+                    socket.emit('error', { message: 'Failed to join conversation' });
+                }
             });
 
-            // // Handle leaving a conversation room
+            // Handle leaving a conversation room
             socket.on('leave_conversation', (conversationId: string) => {
                 socket.leave(conversationId);
                 console.log(`Client ${socket.id} left conversation: ${conversationId}`);
             });
 
             // Handle incoming chat messages
-            socket.on('send_message', async (data) => {
+            socket.on('send_message', async (data: { conversationId: string, message: string }) => {
                 console.log('send_message', data);
                 try {
                     await this.handleChatMessage(socket, data);
@@ -56,23 +111,55 @@ export class WebSocketService {
             });
 
             // Handle user typing indicators
-            socket.on('typing_start', (data) => {
-                socket.to(data.conversationId).emit('user_typing', {
-                    userId: data.userId,
-                    isTyping: true
-                });
+            socket.on('typing_start', async (data: { conversationId: string }) => {
+                try {
+                    // Verify user has access to the conversation
+                    const conversation = await db
+                        .select()
+                        .from(conversations)
+                        .where(and(
+                            eq(conversations.id, data.conversationId),
+                            eq(conversations.userId, socket.userId)
+                        ));
+
+                    if (conversation.length > 0) {
+                        socket.to(data.conversationId).emit('user_typing', {
+                            userId: socket.userId,
+                            username: socket.user.username,
+                            isTyping: true
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error in typing_start:', error);
+                }
             });
 
-            socket.on('typing_stop', (data) => {
-                socket.to(data.conversationId).emit('user_typing', {
-                    userId: data.userId,
-                    isTyping: false
-                });
+            socket.on('typing_stop', async (data: { conversationId: string }) => {
+                try {
+                    // Verify user has access to the conversation
+                    const conversation = await db
+                        .select()
+                        .from(conversations)
+                        .where(and(
+                            eq(conversations.id, data.conversationId),
+                            eq(conversations.userId, socket.userId)
+                        ));
+
+                    if (conversation.length > 0) {
+                        socket.to(data.conversationId).emit('user_typing', {
+                            userId: socket.userId,
+                            username: socket.user.username,
+                            isTyping: false
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error in typing_stop:', error);
+                }
             });
 
             // Handle disconnection
             socket.on('disconnect', () => {
-                console.log(`Client disconnected: ${socket.id}`);
+                console.log(`Client disconnected: ${socket.id}, User: ${socket.user?.username}`);
             });
         });
     }
@@ -80,9 +167,8 @@ export class WebSocketService {
     private async handleChatMessage(socket: any, data: {
         conversationId: string;
         message: string;
-        userId?: string;
     }) {
-        const { conversationId, message: userMessage, userId } = data;
+        const { conversationId, message: userMessage } = data;
 
         if (!userMessage?.trim()) {
             socket.emit('error', { message: 'Message cannot be empty' });
@@ -90,6 +176,20 @@ export class WebSocketService {
         }
 
         try {
+            // Verify the conversation belongs to the user
+            const conversation = await db
+                .select()
+                .from(conversations)
+                .where(and(
+                    eq(conversations.id, conversationId),
+                    eq(conversations.userId, socket.userId)
+                ));
+
+            if (conversation.length === 0) {
+                socket.emit('error', { message: 'Conversation not found or access denied' });
+                return;
+            }
+
             // Save user message to database
             const [savedUserMessage] = await db
                 .insert(messages)
@@ -167,7 +267,6 @@ export class WebSocketService {
             }
 
             // Save the complete AI response to database
-
             const [savedAIMessage] = await db
                 .insert(messages)
                 .values({
@@ -198,30 +297,31 @@ export class WebSocketService {
                 error: error instanceof Error ? error.message : 'Unknown error'
             });
 
-            // Stop AI typing indicator
+            // Stop AI typing indicator on error
             this.io.to(conversationId).emit('ai_typing', { isTyping: false });
         }
     }
 
-    // Method to send messages to specific conversations from other parts of the app
+    // Public methods for external use
     public sendToConversation(conversationId: string, event: string, data: any) {
         this.io.to(conversationId).emit(event, data);
     }
 
-    // Method to broadcast to all connected clients
     public broadcast(event: string, data: any) {
         this.io.emit(event, data);
     }
 
-    // Get Socket.IO instance for external use
     public getIO() {
         return this.io;
     }
 }
 
-export let websocketService: WebSocketService;
+// Singleton instance
+let websocketService: WebSocketService | null = null;
 
 export const initializeWebSocketService = (server: HTTPServer) => {
-    websocketService = new WebSocketService(server);
+    if (!websocketService) {
+        websocketService = new WebSocketService(server);
+    }
     return websocketService;
 }; 

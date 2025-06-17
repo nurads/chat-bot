@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import { db } from '../db';
 import { conversations, messages, users } from '../db/schema';
 import { openaiService } from '../services/openai';
-import { eq, desc } from 'drizzle-orm';
+import { eq, desc, and } from 'drizzle-orm';
 
 export const chatController = {
 
@@ -10,21 +10,30 @@ export const chatController = {
 
     async getConversations(req: Request, res: Response) {
         try {
+            if (!req.user) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
             const allConversations = await db
                 .select()
                 .from(conversations)
+                .where(eq(conversations.userId, req.user.id))
                 .orderBy(desc(conversations.updatedAt));
 
-            res.json(allConversations);
+            return res.json(allConversations);
         } catch (error) {
             console.error('Error fetching conversations:', error);
-            res.status(500).json({ error: 'Failed to fetch conversations' });
+            return res.status(500).json({ error: 'Failed to fetch conversations' });
         }
     },
 
     // Get messages for a specific conversation
     async getMessages(req: Request, res: Response) {
         try {
+            if (!req.user) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
             const { conversationId } = req.params;
 
             const conversationMessages = await db
@@ -33,10 +42,10 @@ export const chatController = {
                 .where(eq(messages.conversationId, conversationId))
                 .orderBy(messages.createdAt);
 
-            res.json(conversationMessages);
+            return res.json(conversationMessages);
         } catch (error) {
             console.error('Error fetching messages:', error);
-            res.status(500).json({ error: 'Failed to fetch messages' });
+            return res.status(500).json({ error: 'Failed to fetch messages' });
         }
     },
 
@@ -73,13 +82,7 @@ export const chatController = {
             // Stream OpenAI response
             const stream = await openaiService.createCompletion(conversationHistory);
 
-            // for await (const chunk of stream) {
-            //     const content = chunk; // chunk is already a string
-            //     if (content) {
-            //         fullResponse += content;
-            //         res.write(`data: ${JSON.stringify({ content })}\n\n`);
-            //     }
-            // }
+
 
             // Save assistant message
             await db
@@ -102,35 +105,43 @@ export const chatController = {
     // Create a new conversation
     async createConversation(req: Request, res: Response) {
         try {
-            const { title, userId } = req.body;
+            if (!req.user) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
+            const { title } = req.body;
 
             const [newConversation] = await db
                 .insert(conversations)
                 .values({
-                    userId: userId,
+                    userId: req.user.id,
                     title: title || 'New Chat'
                 })
                 .returning();
 
-            res.json(newConversation);
+            return res.json(newConversation);
         } catch (error) {
             console.error('Error creating conversation:', error);
-            res.status(500).json({ error: 'Failed to create conversation' });
+            return res.status(500).json({ error: 'Failed to create conversation' });
         }
     },
 
     async deleteConversation(req: Request, res: Response) {
         try {
+            if (!req.user) {
+                return res.status(401).json({ error: 'Unauthorized' });
+            }
+
             const { conversationId } = req.params;
 
             await db
                 .delete(conversations)
-                .where(eq(conversations.id, conversationId));
+                .where(and(eq(conversations.id, conversationId), eq(conversations.userId, req.user.id)));
 
-            res.json({ success: true });
+            return res.json({ success: true });
         } catch (error) {
             console.error('Error deleting conversation:', error);
-            res.status(500).json({ error: 'Failed to delete conversation' });
+            return res.status(500).json({ error: 'Failed to delete conversation' });
         }
     }
 } 

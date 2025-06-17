@@ -1,5 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react'
 import { socketService } from '../services/socketService'
+import { useAuth } from './AuthContext'
 
 interface Message {
     id: string
@@ -9,9 +10,18 @@ interface Message {
     conversationId: string
 }
 
+interface Conversation {
+    id: string
+    title: string
+    createdAt: string
+    updatedAt: string
+}
+
 interface ChatContextType {
     currentConversationId: string | null
     setCurrentConversationId: (id: string | null) => void
+    conversations: Conversation[]
+    setConversations: React.Dispatch<React.SetStateAction<Conversation[]>>
     messages: Message[]
     setMessages: React.Dispatch<React.SetStateAction<Message[]>>
     isAITyping: boolean
@@ -24,14 +34,39 @@ const ChatContext = createContext<ChatContextType | undefined>(undefined)
 
 export function ChatProvider({ children }: { children: ReactNode }) {
     const [currentConversationId, setCurrentConversationId] = useState<string | null>(null)
+    const [conversations, setConversations] = useState<Conversation[]>([])
     const [messages, setMessages] = useState<Message[]>([])
     const [isAITyping, setIsAITyping] = useState(false)
     const [streamingMessage, setStreamingMessage] = useState('')
     const [isConnected, setIsConnected] = useState(false)
+    const { user, token } = useAuth()
 
-    // Initialize socket connection
+    // Debug: Track currentConversationId changes
     useEffect(() => {
-        const socket = socketService.connect()
+        console.log('ChatContext: currentConversationId changed to:', currentConversationId)
+    }, [currentConversationId])
+
+    // Create a wrapper for setCurrentConversationId with debugging
+    const setCurrentConversationIdWithDebug = (id: string | null) => {
+        console.log('ChatContext: Setting currentConversationId from', currentConversationId, 'to', id)
+        setCurrentConversationId(id)
+    }
+
+    // Initialize socket connection only when user is authenticated
+    useEffect(() => {
+        if (!user || !token) {
+            setIsConnected(false)
+            return
+        }
+
+    }, [user, token])
+    useEffect(() => {
+        if (!user || !token) {
+            setIsConnected(false)
+            return
+        }
+
+        const socket = socketService.connect(token)
 
         socket.on('connect', () => {
             setIsConnected(true)
@@ -100,7 +135,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         return () => {
             socketService.disconnect()
         }
-    }, [])
+    }, [user, token])
 
     // Handle conversation changes
     useEffect(() => {
@@ -128,7 +163,17 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const fetchMessages = async (conversationId: string) => {
         try {
             const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000'
-            const response = await fetch(`${API_URL}/api/chat/c/${conversationId}/messages`)
+            const response = await fetch(`${API_URL}/api/chat/c/${conversationId}/messages`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            })
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch messages')
+            }
+
             const data = await response.json()
             console.log('Fetched messages:', data)
             setMessages(data)
@@ -137,10 +182,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         }
     }
 
-    const sendMessage = useCallback((message: string) => {
-        if (!message.trim() || !currentConversationId || !isConnected) return
+    const sendMessage = useCallback((message: string, conversationId?: string) => {
+
+        console.log(currentConversationId, conversationId, user, message.trim())
+
+        if ((!message.trim() || !isConnected || !user)) return
+
+        if (!currentConversationId && !conversationId) return
+
+        console.log('debug currentConversationId', currentConversationId)
 
         const trimmedMessage = message.trim()
+
 
         // Add user message to UI immediately with a unique temp ID
         const tempId = `temp-${Date.now()}-${Math.random()}`
@@ -149,9 +202,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
             content: trimmedMessage,
             role: 'user',
             createdAt: new Date().toISOString(),
-            conversationId: currentConversationId
+            conversationId: currentConversationId || conversationId || ""
         }
-
         console.log('Adding temp message:', newUserMessage)
         setMessages(prev => [...prev, newUserMessage])
 
@@ -161,16 +213,18 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
         // Send message via socket
         socketService.sendMessage({
-            conversationId: currentConversationId,
+            conversationId: currentConversationId || conversationId || "",
             message: trimmedMessage,
-            userId: 'user-1' // You might want to get this from auth context
+            userId: user.id
         })
-    }, [currentConversationId, isConnected])
+    }, [currentConversationId, isConnected, user])
 
     return (
         <ChatContext.Provider value={{
             currentConversationId,
-            setCurrentConversationId,
+            setCurrentConversationId: setCurrentConversationIdWithDebug,
+            conversations,
+            setConversations,
             messages,
             setMessages,
             isAITyping,

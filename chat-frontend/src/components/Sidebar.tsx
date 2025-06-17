@@ -1,20 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Plus, MessageSquare, Trash2, Edit3 } from 'lucide-react'
+import { Plus, MessageSquare, Trash2, Edit3, LogOut } from 'lucide-react'
 import { Button } from './ui/button'
 import { ScrollArea } from './ui/scroll-area'
 import { useChat } from '../contexts/ChatContext'
+import { useAuth } from '../contexts/AuthContext'
 
 const API_URL = import.meta.env.VITE_API_URL
-interface Conversation {
-    id: string
-    title: string
-    updatedAt: string
-}
 
 export default function Sidebar() {
-    const [conversations, setConversations] = useState<Conversation[]>([])
-    const { currentConversationId, setCurrentConversationId } = useChat()
+    const { currentConversationId, setCurrentConversationId, conversations, setConversations } = useChat()
+    const { user, token, logout } = useAuth()
     const navigate = useNavigate()
 
     useEffect(() => {
@@ -23,7 +19,12 @@ export default function Sidebar() {
 
     const fetchConversations = async () => {
         try {
-            const response = await fetch(API_URL + '/api/chat/c')
+            const response = await fetch(API_URL + '/api/chat/c', {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+            })
             const data = await response.json()
             setConversations(data)
         } catch (error) {
@@ -35,8 +36,11 @@ export default function Sidebar() {
         try {
             const response = await fetch(API_URL + '/api/chat/c', {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: 'New Chat', userId: 'yaowu4rrjaad5o030sb2hxl9' })
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify({ title: 'New Chat' })
             })
             const newConversation = await response.json()
             setConversations(prev => [newConversation, ...prev])
@@ -49,7 +53,12 @@ export default function Sidebar() {
 
     const deleteConversation = async (id: string) => {
         try {
-            await fetch(API_URL + `/api/chat/c/${id}`, { method: 'DELETE' })
+            await fetch(API_URL + `/api/chat/c/${id}`, {
+                method: 'DELETE',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                },
+            })
             setConversations(prev => prev.filter(conv => conv.id !== id))
             if (currentConversationId === id) {
                 setCurrentConversationId(null)
@@ -58,6 +67,11 @@ export default function Sidebar() {
         } catch (error) {
             console.error('Failed to delete conversation:', error)
         }
+    }
+
+    const handleLogout = () => {
+        logout()
+        navigate('/')
     }
 
     return (
@@ -129,7 +143,7 @@ export default function Sidebar() {
             </ScrollArea>
 
             {/* Footer */}
-            <div className="border-t border-gray-700 p-4">
+            <div className="border-t border-gray-700 p-4 space-y-3">
                 <div className="flex items-center gap-3 p-2 rounded-md hover:bg-gray-800 cursor-pointer">
                     <div className="w-6 h-6 bg-green-500 rounded-sm flex items-center justify-center">
                         <span className="text-xs font-bold text-white">AI</span>
@@ -138,6 +152,26 @@ export default function Sidebar() {
                         <p className="text-sm font-medium text-gray-100">ChatGPT</p>
                         <p className="text-xs text-gray-400">GPT-4</p>
                     </div>
+                </div>
+
+                {/* User info and logout */}
+                <div className="flex items-center gap-3 p-2 rounded-md hover:bg-gray-800">
+                    <div className="w-6 h-6 bg-blue-500 rounded-sm flex items-center justify-center">
+                        <span className="text-xs font-bold text-white">{user?.name?.[0]?.toUpperCase() || 'U'}</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-100 truncate">{user?.name}</p>
+                        <p className="text-xs text-gray-400 truncate">{user?.email}</p>
+                    </div>
+                    <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-6 w-6 p-0 hover:bg-gray-700 text-gray-400"
+                        onClick={handleLogout}
+                        title="Logout"
+                    >
+                        <LogOut className="h-3 w-3" />
+                    </Button>
                 </div>
             </div>
         </div>
