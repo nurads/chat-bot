@@ -1,0 +1,8 @@
+.env
+node_modules/
+dist/
+chat-backend/dist/
+chat-backend/drizzle/
+chat-backend/database.sqlite
+*.log
+.DS_Store

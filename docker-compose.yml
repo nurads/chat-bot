@@ -1,0 +1,22 @@
+services:
+  redis:
+    image: redis:alpine
+    ports:
+      - 6380:6379
+  pg:
+    image: postgres:alpine
+    restart: always
+    ports:
+      - 5480:5432
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./docker/init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      - POSTGRES_USER=bita-dev
+      - POSTGRES_PASSWORD=bita-dev-admin
+      - POSTGRES_DB=test-db
+    shm_size: 128mb
+volumes:
+  medias:
+  static:
+  pg_data:
