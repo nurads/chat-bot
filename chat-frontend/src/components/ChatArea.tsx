@@ -122,7 +122,7 @@ export default function ChatArea() {
         let conversationId = currentConversationId
         if (!conversationId) {
 
-            const newConversationId = await createNewConversation('New Chat')
+            const newConversationId = await createNewConversation(messageToSend)
             console.log('ChatArea: Created new conversation with ID:', newConversationId)
 
             if (!newConversationId) {

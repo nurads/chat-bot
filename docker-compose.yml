@@ -44,7 +44,6 @@ services:
       - DB_PASSWORD=bita-dev-admin
       - DB_NAME=test-db
       - JWT_SECRET=temporary-secret
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CORS_ORIGIN=http://localhost:3000
     depends_on:
       pg:

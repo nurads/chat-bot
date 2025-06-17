@@ -86,6 +86,8 @@ if (require.main === module) {
             console.log(`🔗 Health check: http://localhost:${PORT}/health`);
             console.log(`🔌 WebSocket server ready`);
             console.log(`🤖 OpenAI integration enabled`);
+            
+console.log('OpenAIService initialized with API key:', process.env.OPENAI_API_KEY ? '***' : 'No API key provided');
         } catch (error) {
             console.error('Error connecting to database:', error);
             process.exit(1);

@@ -74,15 +74,15 @@ export class OpenAIService {
 
         const fullMessages = [systemPrompt, ...messages];
 
-        const stream = this.createMockStream();
+        // const stream = this.createMockStream();
 
-        // const stream = await openai.chat.completions.create({
-        //     model: 'gpt-4o', // or another model
-        //     messages: fullMessages,
-        //     stream: true,
-        //     temperature: 0.7,
-        //     max_tokens: 150,
-        // });
+        const stream = await openai.chat.completions.create({
+            model: 'gpt-4o', // or another model
+            messages: fullMessages,
+            stream: true,
+            temperature: 0.7,
+            max_tokens: 150,
+        });
 
         return stream;
     }
@@ -200,5 +200,4 @@ export class OpenAIService {
     //     }
     // }
 }
-
 export const openaiService = new OpenAIService(process.env.OPENAI_API_KEY || ''); 
